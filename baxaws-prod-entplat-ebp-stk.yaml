@@ -1,0 +1,361 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: EBP Blue Prism infrastructure template
+Parameters:
+  Environment:
+    Description: Environment type
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+    ConstraintDescription: must specify dev
+  CoreWinSecurityGroups:
+    Description: Baxter Core Win Security Group
+    Type: 'AWS::EC2::SecurityGroup::Id'
+  AppSecurityGroups:
+    Description: EBP APP Win Security Group
+    Type: 'AWS::EC2::SecurityGroup::Id'
+  SecurityGroupStackName:
+    Description: >-
+      Name of the CFN stack that contains the networking resources, such as
+      security group, that will be used in this stack
+    Type: String
+    Default: bax-prod-ebp-sg-stk
+  IAMRoleStackName:
+    Description: >-
+      Name of the CFN stack that contains the instance profile name that will be
+      used in this stack
+    Type: String
+    Default: bax-prod-entplat-ebp-roles-policy-stk-InstanceProfile-LWIOISCINM9S
+  KMSKeyId:
+    Description: KMS Key encryption ARN
+    Type: String
+    Default: >-
+      arn:aws:kms:us-east-2:737965399985:key/4a5cbd0d-02f3-4f0f-a6e3-29dce35c118b
+  DomainName:
+    Description: Please specify the DomainName
+    Type: String
+    Default: aws.baxter.com
+  DomainDNS:
+    Description: Please specify the DomainDNS
+    Type: String
+    Default: 10.251.210.129
+  DomainJoinOU:
+    Description: Please specify the Domain OU.
+    Type: String
+    Default: 'OU=Prod,OU=Servers,OU=EBP,OU=Ohio,OU=NA,DC=aws,DC=baxter,DC=com'
+  DomainJoinUserName:
+    Description: Please specify the Username
+    Type: String
+    Default: svc-adjoin@aws.baxter.com
+Mappings:
+  ImageID:
+    prod:
+      AppID: ami-00be14aa081c2398e
+  VpcID:
+    prod:
+      vpcid: vpc-88bdfee1
+  SubnetID:
+    prod:
+      AppSubnet1: subnet-906330f9
+      AppSubnet2: subnet-61b02c1a
+  InstanceType:
+    prod:
+      AppInst01: m4.large
+      AppInst02: m4.large
+  Tags:
+    Appid:
+      Value: '291659'
+    Appname:
+      Value: EBP
+    Owner:
+      Value: 'nathan_gurevich@baxter.com rodrigo_gutierrez@baxter.com'
+    Costcenter:
+      Value: 1001701270
+    Name:
+      Value1: USOHEBPIC102
+      Value2: USOHEBPIC103
+    Backup:
+      Value: 'true'
+    powerOff:
+      Value: NA
+    powerOn:
+      Value: NA
+Resources:
+  SSMParameterDomainJoinOU:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Name: !Join 
+        - '-'
+        - - !FindInMap 
+            - Tags
+            - Appname
+            - Value
+          - DomainJoinOU
+      Description: !Join 
+        - ' '
+        - - The
+          - !FindInMap 
+            - Tags
+            - Appname
+            - Value
+          - domain join OU
+      Type: String
+      Value: !Ref DomainJoinOU
+  SSMParameterDomainDNS:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Name: !Join 
+        - '-'
+        - - !FindInMap 
+            - Tags
+            - Appname
+            - Value
+          - DomainDNS
+      Description: !Join 
+        - ' '
+        - - The
+          - !FindInMap 
+            - Tags
+            - Appname
+            - Value
+          - domain join DNS
+      Type: String
+      Value: !Ref DomainDNS
+  SSMParameterDomainJoinUserName:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Name: !Join 
+        - '-'
+        - - !FindInMap 
+            - Tags
+            - Appname
+            - Value
+          - DomainJoinUserName
+      Description: !Join 
+        - ' '
+        - - The
+          - !FindInMap 
+            - Tags
+            - Appname
+            - Value
+          - domain join Username
+      Type: String
+      Value: !Ref DomainJoinUserName
+  SSMParameterDomainName:
+    Type: 'AWS::SSM::Parameter'
+    Properties:
+      Name: !Join 
+        - '-'
+        - - !FindInMap 
+            - Tags
+            - Appname
+            - Value
+          - DomainName
+      Description: !Join 
+        - ' '
+        - - The
+          - !FindInMap 
+            - Tags
+            - Appname
+            - Value
+          - domain name
+      Type: String
+      Value: !Ref DomainName
+  document:
+    Type: 'AWS::SSM::Document'
+    Properties:
+      DocumentType: Command
+      Content:
+        description: Run a PowerShell script to domain join a Windows instance securely
+        schemaVersion: '2.2'
+        mainSteps:
+          - inputs:
+              runCommand:
+                - >-
+                  # Example PowerShell script to domain join a Windows instance
+                  securely
+                - '    Import-Module ''C:\Program Files (x86)\AWS Tools\PowerShell\AWSPowerShell\AWSPowerShell.psd1'''
+                - '# Enabling traffic routing'
+                - '    Invoke-Expression ''C:\tmp\AWSNetworkReRoute.ps1'''
+                - '    # Parameter names'
+                - !Sub '    $DomainDNS = ''${SSMParameterDomainDNS}'''
+                - !Sub '    $DomainName = ''${SSMParameterDomainName}'''
+                - !Sub '    $DomainJoinUserName = ''${SSMParameterDomainJoinUserName}'''
+                - '    # Review the Password to use. This is a default one, so it needs to be validated'
+                - !Sub '    $DomainJoinPassword = ''DomainJoinPassword'''
+                - !Sub '    $DomainJoinOU = ''${SSMParameterDomainJoinOU}'''
+                - ''
+                - '    # Retrieve configuration values from parameters'
+                - '    $ipDomainDNS = (Get-SSMParameterValue -Name $DomainDNS).Parameters[0].Value'
+                - '    $domain = (Get-SSMParameterValue -Name $DomainName).Parameters[0].Value'
+                - '    $OU = (Get-SSMParameterValue -Name $DomainJoinOU).Parameters[0].Value'
+                - '    $username = $domain + ''\'' + (Get-SSMParameterValue -Name $DomainJoinUserName).Parameters[0].Value'
+                - '    $passparam = (Get-SSMParameterValue -Name $DomainJoinPassword -WithDecryption $True).Parameters[0].Value'
+                - '    $password = ConvertTo-SecureString -string $passparam -AsPlainText -Force'
+                - '    # Create a System.Management.Automation.PSCredential object'
+                - '    $credential = New-Object System.Management.Automation.PSCredential($username, $password)'
+                - ''
+                - '    # Determine the name of the Network Adapter of this machine'
+                - '    $networkAdapter = Get-WmiObject Win32_NetworkAdapter -Filter "AdapterType= ''Ethernet 802.3''"'
+                - '    $networkAdapterName = ($networkAdapter | Select-Object -First 1).NetConnectionID'
+                - ''
+                - '    # Set up the IPv4 address of the AD DomainDNS server as the first DomainDNS server on this machine'
+                - '    netsh.exe interface ipv4 add dnsserver name="$networkAdapterName" address=$ipDomainDNS index=1'
+                - ''
+                - '    $instanceId = (New-Object System.Net.WebClient).DownloadString("http://169.254.169.254/latest/meta-data/instance-id")'
+                - !Sub '    $Tag_name = Get-EC2Tag -region ${AWS::Region} |  Where-Object {$_.ResourceId -eq $instanceId -and $_.Key -eq ''Name''}'
+                - '    $newcomputername = $Tag_name.value'
+                - '    if ($env:ComputerName -ne $newcomputername){'
+                - '        Rename-Computer -NewName $newcomputername -Force'
+                - '        Write-Host "Please waiting for a moment to change Domain and then restart" -ForegroundColor Red'
+                - '        sleep 30'
+                - '    }'
+                - '    add-computer -DomainName $domain -Credential $Credential -OUPath $OU -Force -Options JoinWithNewName,AccountCreate -restart'
+            name: runPowerShellWithSecureString
+            action: 'aws:runPowerShellScript'
+  EBPAppServer1:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      Tenancy: dedicated
+      InstanceType: !FindInMap 
+        - InstanceType
+        - !Ref Environment
+        - AppInst01
+      SubnetId: !FindInMap 
+        - SubnetID
+        - !Ref Environment
+        - AppSubnet1
+      SecurityGroupIds:
+        - !Ref AppSecurityGroups
+        - !Ref CoreWinSecurityGroups
+      ImageId: !FindInMap 
+        - ImageID
+        - !Ref Environment
+        - AppID
+      DisableApiTermination: 'false'
+      Monitoring: 'false'
+      IamInstanceProfile: !Ref IAMRoleStackName
+      Tags:
+        - Key: Appname
+          Value: !FindInMap 
+            - Tags
+            - Appname
+            - Value
+        - Key: Env
+          Value: !Ref Environment
+        - Key: Name
+          Value: !FindInMap 
+            - Tags
+            - Name
+            - Value1
+        - Key: Backup
+          Value: !FindInMap 
+            - Tags
+            - Backup
+            - Value
+        - Key: Appid
+          Value: !FindInMap 
+            - Tags
+            - Appid
+            - Value
+        - Key: Owner
+          Value: !FindInMap 
+            - Tags
+            - Owner
+            - Value
+        - Key: Costcenter
+          Value: !FindInMap 
+            - Tags
+            - Costcenter
+            - Value
+        - Key: powerOff
+          Value: !FindInMap 
+            - Tags
+            - powerOff
+            - Value
+        - Key: powerOn
+          Value: !FindInMap 
+            - Tags
+            - powerOn
+            - Value
+  EBPAppServer2:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      Tenancy: dedicated
+      InstanceType: !FindInMap 
+        - InstanceType
+        - !Ref Environment
+        - AppInst02
+      SubnetId: !FindInMap 
+        - SubnetID
+        - !Ref Environment
+        - AppSubnet1
+      SecurityGroupIds:
+        - !Ref AppSecurityGroups
+        - !Ref CoreWinSecurityGroups
+      ImageId: !FindInMap 
+        - ImageID
+        - !Ref Environment
+        - AppID
+      DisableApiTermination: 'false'
+      Monitoring: 'false'
+      IamInstanceProfile: !Ref IAMRoleStackName
+      Tags:
+        - Key: Appname
+          Value: !FindInMap 
+            - Tags
+            - Appname
+            - Value
+        - Key: Env
+          Value: !Ref Environment
+        - Key: Name
+          Value: !FindInMap 
+            - Tags
+            - Name
+            - Value2
+        - Key: Backup
+          Value: !FindInMap 
+            - Tags
+            - Backup
+            - Value
+        - Key: Appid
+          Value: !FindInMap 
+            - Tags
+            - Appid
+            - Value
+        - Key: Owner
+          Value: !FindInMap 
+            - Tags
+            - Owner
+            - Value
+        - Key: Costcenter
+          Value: !FindInMap 
+            - Tags
+            - Costcenter
+            - Value
+        - Key: powerOff
+          Value: !FindInMap 
+            - Tags
+            - powerOff
+            - Value
+        - Key: powerOn
+          Value: !FindInMap 
+            - Tags
+            - powerOn
+            - Value
+  EBPAppSSMAssociation:
+    Type: 'AWS::SSM::Association'
+    Properties:
+      Name: !Ref document
+      Targets:
+        - Key: InstanceIds
+          Values:
+            - !Ref EBPAppServer1
+            - !Ref EBPAppServer2
+Outputs:
+  EBPAppInstID1:
+    Description: Instance ID
+    Value: !Ref EBPAppServer1
+  EBPAppInstID2:
+    Description: Instance ID
+    Value: !Ref EBPAppServer2
